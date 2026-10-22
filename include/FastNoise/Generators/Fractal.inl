@@ -16,7 +16,6 @@ class FastSIMD::DispatchClass<FractalFBm, SIMD> final : public virtual FractalFB
     {
         float32v gain = this->GetSourceValue( mGain  , seed, pos... );
         float32v weightedStrength = this->GetSourceValue( mWeightedStrength, seed, pos... );
-        float32v lacunarity( mLacunarity );
         float32v amp( 1.0f );
         float32v noise = this->GetSourceValue( mSource, seed, pos... );
 
@@ -28,7 +27,7 @@ class FastSIMD::DispatchClass<FractalFBm, SIMD> final : public virtual FractalFB
             amp *= Lerp( float32v( 1 ), (noise + float32v( 1 )) * float32v( 0.5f ), weightedStrength );
             amp *= gain;
 
-            noise = this->GetSourceValue( mSource, seed, (pos *= lacunarity)... );
+            noise = this->GetSourceValue( mSource, seed, (pos *= mLacunarity)... );
             sum += noise * amp;
         }
 
@@ -46,7 +45,6 @@ class FastSIMD::DispatchClass<FractalRidged, SIMD> final : public virtual Fracta
     {
         float32v gain = this->GetSourceValue( mGain, seed, pos... );
         float32v weightedStrength = this->GetSourceValue( mWeightedStrength, seed, pos... );
-        float32v lacunarity( mLacunarity );
         float32v amp( 1.0f );
         float32v noise = FS::Abs( this->GetSourceValue( mSource, seed, pos... ) );
 
@@ -58,7 +56,7 @@ class FastSIMD::DispatchClass<FractalRidged, SIMD> final : public virtual Fracta
             amp *= Lerp( float32v( 1 ), float32v( 1 ) - noise, weightedStrength );
             amp *= gain;
 
-            noise = FS::Abs( this->GetSourceValue( mSource, seed, (pos *= lacunarity)... ) );
+            noise = FS::Abs( this->GetSourceValue( mSource, seed, (pos *= mLacunarity)... ) );
             sum += (noise * float32v( -2 ) + float32v( 1 )) * amp;
         }
 

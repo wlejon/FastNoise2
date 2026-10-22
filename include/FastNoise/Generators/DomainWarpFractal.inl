@@ -10,16 +10,15 @@ protected:
     template<bool Progressive, typename Self, size_t... I, typename... P>
     static FS_FORCEINLINE float32v GenWarpFractal( const Self& self, std::index_sequence<I...>, int32v seed, P... pos )
     {
-        float32v warpPos[] = { pos... };
+        PosV warpPos[] = { pos... };
         auto* warp = self.GetSourceSIMD( self.mSource );
 
         float32v amp = self.GetSourceValue( warp->GetWarpAmplitude(), seed, pos... );
         float32v weightedStrength = self.GetSourceValue( self.mWeightedStrength, seed, pos... );
-        float32v freq = float32v( warp->GetWarpFrequency() );
+        float freq = warp->GetWarpFrequency();
         int32v seedInc = seed;
 
         float32v gain = self.GetSourceValue( self.mGain, seed, pos... );
-        float32v lacunarity( self.mLacunarity );
 
         float32v strength = warp->Warp( seedInc, amp, ( ( Progressive ? warpPos[I] : pos ) * freq )..., warpPos[I]... );
 
@@ -27,7 +26,7 @@ protected:
         {
             strength = FastLengthSqrt( strength );
             seedInc -= int32v( -1 );
-            freq *= lacunarity;
+            freq *= self.mLacunarity;
             amp *= Lerp( float32v( 1 ), float32v( 1 ) - strength, weightedStrength );
             amp *= gain;
             strength = warp->Warp( seedInc, amp, ( ( Progressive ? warpPos[I] : pos ) * freq )..., warpPos[I]... );

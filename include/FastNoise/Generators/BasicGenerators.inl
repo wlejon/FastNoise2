@@ -15,8 +15,7 @@ protected:
     template<typename... P>
     FS_FORCEINLINE void ScalePositions( P&... pos ) const
     {
-        float32v vFrequency( mFrequency );
-        ( (pos *= vFrequency), ... );
+        ( (pos *= mFrequency), ... );
     }
 };
 
@@ -51,6 +50,13 @@ class FastSIMD::DispatchClass<White, SIMD> final : public virtual White, public 
     FS_FORCEINLINE float32v GenT( int32v seed, P... pos ) const
     {
         seed += int32v( mSeedOffset );
+        // A hash of the positions' bits: of the float a position is, near zero or not.
+        return GenFlat( seed, PosFlat( pos )... );
+    }
+
+    template<typename... P>
+    FS_FORCEINLINE float32v GenFlat( int32v seed, P... pos ) const
+    {
         size_t idx = 0;
         ((pos = FS::Cast<float>( (FS::Cast<int32_t>( pos ) ^ (FS::Cast<int32_t>( pos ) >> 16)) * int32v( Primes::Lookup[idx++] ) )), ...);
 
@@ -68,7 +74,7 @@ class FastSIMD::DispatchClass<Checkerboard, SIMD> final : public virtual Checker
     {
         this->ScalePositions( pos... );
 
-        int32v value = (FS::Convert<int32_t>( pos ) ^ ...);
+        int32v value = (PosRound( pos ) ^ ...);
 
         return this->ScaleOutput( FS::Cast<float>( (value & int32v( 1 )) << 30 ), 0, 2 );
     }
@@ -84,7 +90,7 @@ class FastSIMD::DispatchClass<SineWave, SIMD> final : public virtual SineWave, p
     {
         this->ScalePositions( pos... );
 
-        return this->ScaleOutput( (FS::Sin( pos ) * ...), -1, 1 );
+        return this->ScaleOutput( (FS::Sin( PosWrap( pos, 6.283185307179586 ) ) * ...), -1, 1 );
     }
 };
 
@@ -100,7 +106,7 @@ class FastSIMD::DispatchClass<Gradient, SIMD> final : public virtual Gradient, p
         size_t multiplierIdx = 0;
         float32v r( 0 );
 
-        ((r = FS::FMulAdd( pos + this->GetSourceValue( mOffset[offsetIdx++], seed, pos... ), float32v( mMultiplier[multiplierIdx++]), r )), ...);
+        ((r = FS::FMulAdd( PosFlat( pos ) + this->GetSourceValue( mOffset[offsetIdx++], seed, pos... ), float32v( mMultiplier[multiplierIdx++]), r )), ...);
         return r;
     }
 };
@@ -122,7 +128,7 @@ class FastSIMD::DispatchClass<DistanceToPoint, SIMD> final : public virtual Dist
         float32v minkowskiP = GetMinkowskiP( mDistanceFunction, mMinkowskiP, seed, pos... );
 
         // Braced init evaluates left to right; expanding into the call is right to left on the MS ABI, which changes fast-math output
-        float32v offsetPos[] = { ( pos - this->GetSourceValue( mPoint[I], seed, pos... ) )... };
+        float32v offsetPos[] = { ( PosFlat( pos ) - this->GetSourceValue( mPoint[I], seed, pos... ) )... };
 
         return CalcDistance( mDistanceFunction, minkowskiP, offsetPos[I]... );
     }

@@ -4,16 +4,18 @@
 template<FastSIMD::FeatureSet SIMD>
 class FastSIMD::DispatchClass<Value, SIMD> final : public virtual Value, public DispatchClass<VariableRange<Seeded<ScalableGenerator>>, SIMD>
 {
-    float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y ) const
+    float32v FS_VECTORCALL Gen( int32v seed, PosV px, PosV py ) const
     {
         seed += int32v( mSeedOffset );
-        this->ScalePositions( x, y );
+        this->ScalePositions( px, py );
+        int32_t xc, yc;
+        float32v x = Rebase( px, xc ), y = Rebase( py, yc );
 
         float32v xs = FS::Floor( x );
         float32v ys = FS::Floor( y );
 
-        int32v x0 = FS::Convert<int32_t>( xs ) * int32v( Primes::X );
-        int32v y0 = FS::Convert<int32_t>( ys ) * int32v( Primes::Y );
+        int32v x0 = ( FS::Convert<int32_t>( xs ) + int32v( xc ) ) * int32v( Primes::X );
+        int32v y0 = ( FS::Convert<int32_t>( ys ) + int32v( yc ) ) * int32v( Primes::Y );
         int32v x1 = x0 + int32v( Primes::X );
         int32v y1 = y0 + int32v( Primes::Y );
 
@@ -26,18 +28,20 @@ class FastSIMD::DispatchClass<Value, SIMD> final : public virtual Value, public 
             -kValueBounds, kValueBounds );
     }
 
-    float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y, float32v z ) const
+    float32v FS_VECTORCALL Gen( int32v seed, PosV px, PosV py, PosV pz ) const
     {
         seed += int32v( mSeedOffset );
-        this->ScalePositions( x, y, z );
+        this->ScalePositions( px, py, pz );
+        int32_t xc, yc, zc;
+        float32v x = Rebase( px, xc ), y = Rebase( py, yc ), z = Rebase( pz, zc );
 
         float32v xs = FS::Floor( x );
         float32v ys = FS::Floor( y );
         float32v zs = FS::Floor( z );
 
-        int32v x0 = FS::Convert<int32_t>( xs ) * int32v( Primes::X );
-        int32v y0 = FS::Convert<int32_t>( ys ) * int32v( Primes::Y );
-        int32v z0 = FS::Convert<int32_t>( zs ) * int32v( Primes::Z );
+        int32v x0 = ( FS::Convert<int32_t>( xs ) + int32v( xc ) ) * int32v( Primes::X );
+        int32v y0 = ( FS::Convert<int32_t>( ys ) + int32v( yc ) ) * int32v( Primes::Y );
+        int32v z0 = ( FS::Convert<int32_t>( zs ) + int32v( zc ) ) * int32v( Primes::Z );
         int32v x1 = x0 + int32v( Primes::X );
         int32v y1 = y0 + int32v( Primes::Y );
         int32v z1 = z0 + int32v( Primes::Z );
@@ -55,20 +59,22 @@ class FastSIMD::DispatchClass<Value, SIMD> final : public virtual Value, public 
             -kValueBounds, kValueBounds );
     }
 
-    float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y, float32v z, float32v w ) const
+    float32v FS_VECTORCALL Gen( int32v seed, PosV px, PosV py, PosV pz, PosV pw ) const
     {
         seed += int32v( mSeedOffset );
-        this->ScalePositions( x, y, z, w );
+        this->ScalePositions( px, py, pz, pw );
+        int32_t xc, yc, zc, wc;
+        float32v x = Rebase( px, xc ), y = Rebase( py, yc ), z = Rebase( pz, zc ), w = Rebase( pw, wc );
 
         float32v xs = FS::Floor( x );
         float32v ys = FS::Floor( y );
         float32v zs = FS::Floor( z );
         float32v ws = FS::Floor( w );
 
-        int32v x0 = FS::Convert<int32_t>( xs ) * int32v( Primes::X );
-        int32v y0 = FS::Convert<int32_t>( ys ) * int32v( Primes::Y );
-        int32v z0 = FS::Convert<int32_t>( zs ) * int32v( Primes::Z );
-        int32v w0 = FS::Convert<int32_t>( ws ) * int32v( Primes::W );
+        int32v x0 = ( FS::Convert<int32_t>( xs ) + int32v( xc ) ) * int32v( Primes::X );
+        int32v y0 = ( FS::Convert<int32_t>( ys ) + int32v( yc ) ) * int32v( Primes::Y );
+        int32v z0 = ( FS::Convert<int32_t>( zs ) + int32v( zc ) ) * int32v( Primes::Z );
+        int32v w0 = ( FS::Convert<int32_t>( ws ) + int32v( wc ) ) * int32v( Primes::W );
         int32v x1 = x0 + int32v( Primes::X );
         int32v y1 = y0 + int32v( Primes::Y );
         int32v z1 = z0 + int32v( Primes::Z );

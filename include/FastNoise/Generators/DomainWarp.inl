@@ -10,7 +10,7 @@ class FastSIMD::DispatchClass<DomainWarp, SIMD> : public virtual DomainWarp, pub
     FS_FORCEINLINE float32v GenT( int32v seed, P... pos ) const
     {
         // Seed offset is applied inside Warp() so it also applies when called from DomainWarpFractal
-        Warp( seed, this->GetSourceValue( mWarpAmplitude, seed, pos... ), ( pos * float32v( this->mFrequency ) )..., pos... );
+        Warp( seed, this->GetSourceValue( mWarpAmplitude, seed, pos... ), ( pos * this->mFrequency )..., pos... );
 
         return this->GetSourceValue( mSource, seed, pos...);
     }
@@ -20,23 +20,27 @@ public:
     const FastNoise::HybridSource& GetWarpAmplitude() const { return mWarpAmplitude; }
     const FastNoise::GeneratorSource& GetWarpSource() const { return mSource; }
 
-    virtual float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, float32v x, float32v y, float32v& xOut, float32v& yOut ) const = 0;
-    virtual float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, float32v x, float32v y, float32v z, float32v& xOut, float32v& yOut, float32v& zOut ) const = 0;
-    virtual float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, float32v x, float32v y, float32v z, float32v w, float32v& xOut, float32v& yOut, float32v& zOut, float32v& wOut ) const = 0;
+    // Adds the warp at (x, y...) to each lane's part of the out positions
+    // (a warp is a displacement of each lane's own); returns its strength.
+    virtual float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, PosV x, PosV y, PosV& xOut, PosV& yOut ) const = 0;
+    virtual float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, PosV x, PosV y, PosV z, PosV& xOut, PosV& yOut, PosV& zOut ) const = 0;
+    virtual float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, PosV x, PosV y, PosV z, PosV w, PosV& xOut, PosV& yOut, PosV& zOut, PosV& wOut ) const = 0;
 };
 
 template<FastSIMD::FeatureSet SIMD>
 class FastSIMD::DispatchClass<DomainWarpGradient, SIMD> final : public virtual DomainWarpGradient, public DispatchClass<DomainWarp, SIMD>
 {
 public:
-    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, float32v x, float32v y, float32v& xOut, float32v& yOut ) const
+    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, PosV px, PosV py, PosV& xOut, PosV& yOut ) const
     {
         seed += int32v( mSeedOffset );
+        int32_t xc, yc;
+        float32v x = Rebase( px, xc ), y = Rebase( py, yc );
         float32v xs = FS::Floor( x );
         float32v ys = FS::Floor( y );
 
-        int32v x0 = FS::Convert<int32_t>( xs ) * int32v( Primes::X );
-        int32v y0 = FS::Convert<int32_t>( ys ) * int32v( Primes::Y );
+        int32v x0 = ( FS::Convert<int32_t>( xs ) + int32v( xc ) ) * int32v( Primes::X );
+        int32v y0 = ( FS::Convert<int32_t>( ys ) + int32v( yc ) ) * int32v( Primes::Y );
         int32v x1 = x0 + int32v( Primes::X );
         int32v y1 = y0 + int32v( Primes::Y );
 
@@ -67,22 +71,24 @@ public:
         xWarp = FS::FMulSub( xWarp, normalise, float32v( 1 ) );
         yWarp = FS::FMulSub( yWarp, normalise, float32v( 1 ) );
 
-        xOut = FS::FMulAdd( xWarp, warpAmp * float32v( this->mAxisScale[0] ), xOut );
-        yOut = FS::FMulAdd( yWarp, warpAmp * float32v( this->mAxisScale[1] ), yOut );
+        xOut.v = FS::FMulAdd( xWarp, warpAmp * float32v( this->mAxisScale[0] ), xOut.v );
+        yOut.v = FS::FMulAdd( yWarp, warpAmp * float32v( this->mAxisScale[1] ), yOut.v );
 
         return FS::FMulAdd( xWarp, xWarp, yWarp * yWarp );
     }
             
-    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, float32v x, float32v y, float32v z, float32v& xOut, float32v& yOut, float32v& zOut ) const
+    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, PosV px, PosV py, PosV pz, PosV& xOut, PosV& yOut, PosV& zOut ) const
     {
         seed += int32v( mSeedOffset );
+        int32_t xc, yc, zc;
+        float32v x = Rebase( px, xc ), y = Rebase( py, yc ), z = Rebase( pz, zc );
         float32v xs = FS::Floor( x );
         float32v ys = FS::Floor( y );
         float32v zs = FS::Floor( z );
 
-        int32v x0 = FS::Convert<int32_t>( xs ) * int32v( Primes::X );
-        int32v y0 = FS::Convert<int32_t>( ys ) * int32v( Primes::Y );
-        int32v z0 = FS::Convert<int32_t>( zs ) * int32v( Primes::Z );
+        int32v x0 = ( FS::Convert<int32_t>( xs ) + int32v( xc ) ) * int32v( Primes::X );
+        int32v y0 = ( FS::Convert<int32_t>( ys ) + int32v( yc ) ) * int32v( Primes::Y );
+        int32v z0 = ( FS::Convert<int32_t>( zs ) + int32v( zc ) ) * int32v( Primes::Z );
         int32v x1 = x0 + int32v( Primes::X );
         int32v y1 = y0 + int32v( Primes::Y );
         int32v z1 = z0 + int32v( Primes::Z );
@@ -123,25 +129,27 @@ public:
         yWarp = FS::FMulSub( yWarp, normalise, float32v( 1 ) );
         zWarp = FS::FMulSub( zWarp, normalise, float32v( 1 ) );
 
-        xOut = FS::FMulAdd( xWarp, warpAmp * float32v( this->mAxisScale[0] ), xOut );
-        yOut = FS::FMulAdd( yWarp, warpAmp * float32v( this->mAxisScale[1] ), yOut );
-        zOut = FS::FMulAdd( zWarp, warpAmp * float32v( this->mAxisScale[2] ), zOut );
+        xOut.v = FS::FMulAdd( xWarp, warpAmp * float32v( this->mAxisScale[0] ), xOut.v );
+        yOut.v = FS::FMulAdd( yWarp, warpAmp * float32v( this->mAxisScale[1] ), yOut.v );
+        zOut.v = FS::FMulAdd( zWarp, warpAmp * float32v( this->mAxisScale[2] ), zOut.v );
 
         return FS::FMulAdd( xWarp, xWarp, FS::FMulAdd( yWarp, yWarp, zWarp * zWarp ) );
     }
             
-    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, float32v x, float32v y, float32v z, float32v w, float32v& xOut, float32v& yOut, float32v& zOut, float32v& wOut ) const
+    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, PosV px, PosV py, PosV pz, PosV pw, PosV& xOut, PosV& yOut, PosV& zOut, PosV& wOut ) const
     {
         seed += int32v( mSeedOffset );
+        int32_t xc, yc, zc, wc;
+        float32v x = Rebase( px, xc ), y = Rebase( py, yc ), z = Rebase( pz, zc ), w = Rebase( pw, wc );
         float32v xs = FS::Floor( x );
         float32v ys = FS::Floor( y );
         float32v zs = FS::Floor( z );
         float32v ws = FS::Floor( w );
 
-        int32v x0 = FS::Convert<int32_t>( xs ) * int32v( Primes::X );
-        int32v y0 = FS::Convert<int32_t>( ys ) * int32v( Primes::Y );
-        int32v z0 = FS::Convert<int32_t>( zs ) * int32v( Primes::Z );
-        int32v w0 = FS::Convert<int32_t>( ws ) * int32v( Primes::W );
+        int32v x0 = ( FS::Convert<int32_t>( xs ) + int32v( xc ) ) * int32v( Primes::X );
+        int32v y0 = ( FS::Convert<int32_t>( ys ) + int32v( yc ) ) * int32v( Primes::Y );
+        int32v z0 = ( FS::Convert<int32_t>( zs ) + int32v( zc ) ) * int32v( Primes::Z );
+        int32v w0 = ( FS::Convert<int32_t>( ws ) + int32v( wc ) ) * int32v( Primes::W );
         int32v x1 = x0 + int32v( Primes::X );
         int32v y1 = y0 + int32v( Primes::Y );
         int32v z1 = z0 + int32v( Primes::Z );
@@ -196,10 +204,10 @@ public:
         zWarp = FS::FMulSub( zWarp, normalise, float32v( 1 ) );
         wWarp = FS::FMulSub( wWarp, normalise, float32v( 1 ) );
 
-        xOut = FS::FMulAdd( xWarp, warpAmp * float32v( this->mAxisScale[0] ), xOut );
-        yOut = FS::FMulAdd( yWarp, warpAmp * float32v( this->mAxisScale[1] ), yOut );
-        zOut = FS::FMulAdd( zWarp, warpAmp * float32v( this->mAxisScale[2] ), zOut );
-        wOut = FS::FMulAdd( wWarp, warpAmp * float32v( this->mAxisScale[3] ), wOut );
+        xOut.v = FS::FMulAdd( xWarp, warpAmp * float32v( this->mAxisScale[0] ), xOut.v );
+        yOut.v = FS::FMulAdd( yWarp, warpAmp * float32v( this->mAxisScale[1] ), yOut.v );
+        zOut.v = FS::FMulAdd( zWarp, warpAmp * float32v( this->mAxisScale[2] ), zOut.v );
+        wOut.v = FS::FMulAdd( wWarp, warpAmp * float32v( this->mAxisScale[3] ), wOut.v );
 
         return FS::FMulAdd( xWarp, xWarp, FS::FMulAdd( yWarp, yWarp, FS::FMulAdd( zWarp, zWarp, wWarp * wWarp ) ) );
     }

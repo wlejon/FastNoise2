@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cmath>
 #include <cstring>
 #include <utility>
 
@@ -13,18 +14,112 @@ using float32v = FS::Register<float, kRegisterSize>;
 using int32v = FS::Register<std::int32_t, kRegisterSize>;
 using mask32v = typename float32v::MaskType;
 
+// A coordinate of the positions a generator is called with: an origin in
+// double, the same for every lane, and each lane's offset from it in float.
+// A float holds a position millions of units from zero (a planet's surface)
+// only to a fraction of a unit, too coarse for a lattice noise's cells and
+// the fractions it interpolates over; with the origin in double, a lattice
+// noise rebases on its own cell of the origin (Rebase) and works in small
+// numbers however far out the positions are. Scaling a position by a
+// constant scales both parts; offsets computed per lane add to the lane's
+// part. With an origin of 0 every generator computes exactly what it did
+// with a plain float.
+struct PosV
+{
+    float32v v;
+    double o = 0.0;
+
+    PosV() = default;
+    FS_FORCEINLINE PosV( float32v lanes ) : v( lanes ) {}
+    FS_FORCEINLINE PosV( float32v lanes, double origin ) : v( lanes ), o( origin ) {}
+
+    FS_FORCEINLINE PosV& operator*=( float s ) { v *= float32v( s ); o *= (double)s; return *this; }
+    FS_FORCEINLINE PosV& operator+=( float32v d ) { v += d; return *this; }
+};
+
+FS_FORCEINLINE static PosV operator*( PosV p, float s ) { return p *= s; }
+FS_FORCEINLINE static PosV operator+( PosV p, float32v d ) { return p += d; }
+FS_FORCEINLINE static PosV operator-( PosV p, float32v d ) { p.v -= d; return p; }
+FS_FORCEINLINE static PosV operator+( PosV a, PosV b ) { return { a.v + b.v, a.o + b.o }; }
+FS_FORCEINLINE static PosV operator-( PosV a, PosV b ) { return { a.v - b.v, a.o - b.o }; }
+
+// a * k + b and b - a * k, as FS::FMulAdd and FS::FNMulAdd.
+FS_FORCEINLINE static PosV PosFMulAdd( PosV a, float k, PosV b ) { return { FS::FMulAdd( a.v, float32v( k ), b.v ), a.o * (double)k + b.o }; }
+FS_FORCEINLINE static PosV PosFNMulAdd( PosV a, float k, PosV b ) { return { FS::FNMulAdd( a.v, float32v( k ), b.v ), b.o - a.o * (double)k }; }
+
+// The position as one float (exact only near zero), for a generator whose
+// value is a function of the position itself rather than of a lattice.
+FS_FORCEINLINE static float32v PosFlat( PosV p )
+{
+    return p.o == 0.0 ? p.v : float32v( (float)p.o ) + p.v;
+}
+
+// The lattice cell holding the origin (an integer, taken mod 2^32 as the
+// hashes take it) and each lane's position from that cell's corner: a
+// lattice noise floors, rounds and hashes those, adding the cell to its own.
+FS_FORCEINLINE static float32v Rebase( PosV p, int32_t& cell )
+{
+    if( p.o == 0.0 )
+    {
+        cell = 0;
+        return p.v;
+    }
+    double c = std::floor( p.o );
+    cell = (int32_t)(uint32_t)(int64_t)c;
+    return p.v + float32v( (float)( p.o - c ) );
+}
+
+// The position less a whole number of `period`s of its origin, for a
+// generator periodic in it.
+FS_FORCEINLINE static float32v PosWrap( PosV p, double period )
+{
+    return p.o == 0.0 ? p.v : p.v + float32v( (float)( p.o - period * std::floor( p.o / period ) ) );
+}
+
+// The position rounded to an integer as FS::Convert rounds (the rebased lanes
+// rounded, plus the origin's cell, itself an integer).
+FS_FORCEINLINE static int32v PosRound( PosV p )
+{
+    int32_t cell;
+    float32v lanes = Rebase( p, cell );
+    return FS::Convert<int32_t>( lanes ) + int32v( cell );
+}
+
+// The same for a lattice noise working in skewed coordinates (the simplex
+// family): each axis' origin plus `skew` times the sum of them all, split
+// into its cell and the fraction the lanes' skewed positions add.
+template<size_t N>
+FS_FORCEINLINE static void RebaseSkewed( const PosV ( &p )[N], float skew, int32_t ( &cell )[N], float ( &fraction )[N] )
+{
+    double sum = 0.0;
+    for( size_t i = 0; i < N; i++ ) sum += p[i].o;
+    for( size_t i = 0; i < N; i++ )
+    {
+        double s = p[i].o + (double)skew * sum;
+        double c = std::floor( s );
+        cell[i] = (int32_t)(uint32_t)(int64_t)c;
+        fraction[i] = (float)( s - c );
+    }
+}
+
+// An integer times a prime, wrapping as the hashes' arithmetic does.
+FS_FORCEINLINE static int32_t PrimedCell( int32_t cell, int32_t prime )
+{
+    return (int32_t)( (uint32_t)cell * (uint32_t)prime );
+}
+
 template<FastSIMD::FeatureSet SIMD>
 class FastSIMD::DispatchClass<Generator, SIMD> : public virtual Generator
 {
 public:
-    virtual float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y ) const = 0;
-    virtual float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y, float32v z ) const = 0;
-    virtual float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y, float32v z, float32v w ) const { return Gen( seed, x, y, z ); }
+    virtual float32v FS_VECTORCALL Gen( int32v seed, PosV x, PosV y ) const = 0;
+    virtual float32v FS_VECTORCALL Gen( int32v seed, PosV x, PosV y, PosV z ) const = 0;
+    virtual float32v FS_VECTORCALL Gen( int32v seed, PosV x, PosV y, PosV z, PosV w ) const { return Gen( seed, x, y, z ); }
 
 #define FASTNOISE_IMPL_GEN_T\
-    float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y ) const override { return GenT( seed, x, y ); }\
-    float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y, float32v z ) const override { return GenT( seed, x, y, z ); }\
-    float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y, float32v z, float32v w ) const override { return GenT( seed, x, y, z, w ); }
+    float32v FS_VECTORCALL Gen( int32v seed, PosV x, PosV y ) const override { return GenT( seed, x, y ); }\
+    float32v FS_VECTORCALL Gen( int32v seed, PosV x, PosV y, PosV z ) const override { return GenT( seed, x, y, z ); }\
+    float32v FS_VECTORCALL Gen( int32v seed, PosV x, PosV y, PosV z, PosV w ) const override { return GenT( seed, x, y, z, w ); }
 
     FastSIMD::FeatureSet GetActiveFeatureSet() const final
     {
@@ -77,15 +172,13 @@ public:
         return simdT;
     }
 
-    FastNoise::OutputMinMax GenUniformGrid2D( float* noiseOut, float xOffset, float yOffset, int xCount, int yCount, float xStepSize, float yStepSize, int seed ) const final
+    FastNoise::OutputMinMax GenUniformGrid2D( float* noiseOut, double xOffset, double yOffset, int xCount, int yCount, float xStepSize, float yStepSize, int seed ) const final
     {
         float32v min( kInfinity );
         float32v max( -kInfinity );
 
         int32v xIdx( 0 );
         int32v yIdx( 0 );
-        float32v xOffsetV( xOffset );
-        float32v yOffsetV( yOffset );
         float32v xScale( xStepSize );
         float32v yScale( yStepSize );
 
@@ -101,8 +194,8 @@ public:
 
         while( index < totalValues - (intptr_t)int32v::ElementCount )
         {
-            float32v xPos = FS::FMulAdd( FS::Convert<float>( xIdx ), xScale, xOffsetV );
-            float32v yPos = FS::FMulAdd( FS::Convert<float>( yIdx ), yScale, yOffsetV );
+            PosV xPos( FS::Convert<float>( xIdx ) * xScale, xOffset );
+            PosV yPos( FS::Convert<float>( yIdx ) * yScale, yOffset );
 
             float32v gen = Gen( int32v( seed ), xPos, yPos );
             FS::Store( &noiseOut[index], gen );
@@ -118,15 +211,15 @@ public:
             AxisReset<false>( xIdx, yIdx, xMax, xCountV, xCount );
         }
 
-        float32v xPos = FS::FMulAdd( FS::Convert<float>( xIdx ), xScale, xOffsetV );
-        float32v yPos = FS::FMulAdd( FS::Convert<float>( yIdx ), yScale, yOffsetV );
+        PosV xPos( FS::Convert<float>( xIdx ) * xScale, xOffset );
+        PosV yPos( FS::Convert<float>( yIdx ) * yScale, yOffset );
 
         float32v gen = Gen( int32v( seed ), xPos, yPos );
 
         return StoreRemaining( noiseOut, totalValues, index, min, max, gen );
     }
 
-    FastNoise::OutputMinMax GenUniformGrid3D( float* noiseOut, float xOffset, float yOffset, float zOffset, int xCount, int yCount, int zCount, float xStepSize, float yStepSize, float zStepSize, int seed ) const final
+    FastNoise::OutputMinMax GenUniformGrid3D( float* noiseOut, double xOffset, double yOffset, double zOffset, int xCount, int yCount, int zCount, float xStepSize, float yStepSize, float zStepSize, int seed ) const final
     {
         float32v min( kInfinity );
         float32v max( -kInfinity );
@@ -134,9 +227,6 @@ public:
         int32v xIdx( 0 );
         int32v yIdx( 0 );
         int32v zIdx( 0 );
-        float32v xOffsetV( xOffset );
-        float32v yOffsetV( yOffset );
-        float32v zOffsetV( zOffset );
         float32v xScale( xStepSize );
         float32v yScale( yStepSize );
         float32v zScale( zStepSize );
@@ -156,9 +246,9 @@ public:
 
         while( index < totalValues - (intptr_t)int32v::ElementCount )
         {
-            float32v xPos = FS::FMulAdd( FS::Convert<float>( xIdx ), xScale, xOffsetV );
-            float32v yPos = FS::FMulAdd( FS::Convert<float>( yIdx ), yScale, yOffsetV );
-            float32v zPos = FS::FMulAdd( FS::Convert<float>( zIdx ), zScale, zOffsetV );
+            PosV xPos( FS::Convert<float>( xIdx ) * xScale, xOffset );
+            PosV yPos( FS::Convert<float>( yIdx ) * yScale, yOffset );
+            PosV zPos( FS::Convert<float>( zIdx ) * zScale, zOffset );
 
             float32v gen = Gen( int32v( seed ), xPos, yPos, zPos );
             FS::Store( &noiseOut[index], gen );
@@ -175,16 +265,16 @@ public:
             AxisReset<false>( yIdx, zIdx, yMax, yCountV, xCount * yCount );
         }
 
-        float32v xPos = FS::FMulAdd( FS::Convert<float>( xIdx ), xScale, xOffsetV );
-        float32v yPos = FS::FMulAdd( FS::Convert<float>( yIdx ), yScale, yOffsetV );
-        float32v zPos = FS::FMulAdd( FS::Convert<float>( zIdx ), zScale, zOffsetV );
+        PosV xPos( FS::Convert<float>( xIdx ) * xScale, xOffset );
+        PosV yPos( FS::Convert<float>( yIdx ) * yScale, yOffset );
+        PosV zPos( FS::Convert<float>( zIdx ) * zScale, zOffset );
 
         float32v gen = Gen( int32v( seed ), xPos, yPos, zPos );
 
         return StoreRemaining( noiseOut, totalValues, index, min, max, gen );
     }
 
-    FastNoise::OutputMinMax GenUniformGrid4D( float* noiseOut, float xOffset, float yOffset, float zOffset, float wOffset, int xCount, int yCount, int zCount, int wCount, float xStepSize, float yStepSize, float zStepSize, float wStepSize, int seed ) const final
+    FastNoise::OutputMinMax GenUniformGrid4D( float* noiseOut, double xOffset, double yOffset, double zOffset, double wOffset, int xCount, int yCount, int zCount, int wCount, float xStepSize, float yStepSize, float zStepSize, float wStepSize, int seed ) const final
     {
         float32v min( kInfinity );
         float32v max( -kInfinity );
@@ -193,10 +283,6 @@ public:
         int32v yIdx( 0 );
         int32v zIdx( 0 );
         int32v wIdx( 0 );
-        float32v xOffsetV( xOffset );
-        float32v yOffsetV( yOffset );
-        float32v zOffsetV( zOffset );
-        float32v wOffsetV( wOffset );
         float32v xScale( xStepSize );
         float32v yScale( yStepSize );
         float32v zScale( zStepSize );
@@ -220,10 +306,10 @@ public:
 
         while( index < totalValues - (intptr_t)int32v::ElementCount )
         {
-            float32v xPos = FS::FMulAdd( FS::Convert<float>( xIdx ), xScale, xOffsetV );
-            float32v yPos = FS::FMulAdd( FS::Convert<float>( yIdx ), yScale, yOffsetV );
-            float32v zPos = FS::FMulAdd( FS::Convert<float>( zIdx ), zScale, zOffsetV );
-            float32v wPos = FS::FMulAdd( FS::Convert<float>( wIdx ), wScale, wOffsetV );
+            PosV xPos( FS::Convert<float>( xIdx ) * xScale, xOffset );
+            PosV yPos( FS::Convert<float>( yIdx ) * yScale, yOffset );
+            PosV zPos( FS::Convert<float>( zIdx ) * zScale, zOffset );
+            PosV wPos( FS::Convert<float>( wIdx ) * wScale, wOffset );
 
             float32v gen = Gen( int32v( seed ), xPos, yPos, zPos, wPos );
             FS::Store( &noiseOut[index], gen );
@@ -241,17 +327,17 @@ public:
             AxisReset<false>( zIdx, wIdx, zMax, zCountV, xCount * yCount * zCount );
         }
 
-        float32v xPos = FS::FMulAdd( FS::Convert<float>( xIdx ), xScale, xOffsetV );
-        float32v yPos = FS::FMulAdd( FS::Convert<float>( yIdx ), yScale, yOffsetV );
-        float32v zPos = FS::FMulAdd( FS::Convert<float>( zIdx ), zScale, zOffsetV );
-        float32v wPos = FS::FMulAdd( FS::Convert<float>( wIdx ), wScale, wOffsetV );
+        PosV xPos( FS::Convert<float>( xIdx ) * xScale, xOffset );
+        PosV yPos( FS::Convert<float>( yIdx ) * yScale, yOffset );
+        PosV zPos( FS::Convert<float>( zIdx ) * zScale, zOffset );
+        PosV wPos( FS::Convert<float>( wIdx ) * wScale, wOffset );
 
         float32v gen = Gen( int32v( seed ), xPos, yPos, zPos, wPos );
 
         return StoreRemaining( noiseOut, totalValues, index, min, max, gen );
     }
 
-    FastNoise::OutputMinMax GenPositionArray2D( float* noiseOut, int count, const float* xPosArray, const float* yPosArray, float xOffset, float yOffset, int seed ) const final
+    FastNoise::OutputMinMax GenPositionArray2D( float* noiseOut, int count, const float* xPosArray, const float* yPosArray, double xOffset, double yOffset, int seed ) const final
     {
         float32v min( kInfinity );
         float32v max( -kInfinity );
@@ -259,8 +345,8 @@ public:
         intptr_t index = 0;
         while( index < count - (intptr_t)int32v::ElementCount )
         {
-            float32v xPos = float32v( xOffset ) + FS::Load<float32v>( &xPosArray[index] );
-            float32v yPos = float32v( yOffset ) + FS::Load<float32v>( &yPosArray[index] );
+            PosV xPos( FS::Load<float32v>( &xPosArray[index] ), xOffset );
+            PosV yPos( FS::Load<float32v>( &yPosArray[index] ), yOffset );
 
             float32v gen = Gen( int32v( seed ), xPos, yPos );
             FS::Store( &noiseOut[index], gen );
@@ -272,15 +358,15 @@ public:
             index += int32v::ElementCount;
         }
 
-        float32v xPos = float32v( xOffset ) + LoadRemaining( xPosArray, count, index );
-        float32v yPos = float32v( yOffset ) + LoadRemaining( yPosArray, count, index );
+        PosV xPos( LoadRemaining( xPosArray, count, index ), xOffset );
+        PosV yPos( LoadRemaining( yPosArray, count, index ), yOffset );
 
         float32v gen = Gen( int32v( seed ), xPos, yPos );
 
         return StoreRemaining<true>( noiseOut, count, index, min, max, gen );
     }
 
-    FastNoise::OutputMinMax GenPositionArray3D( float* noiseOut, int count, const float* xPosArray, const float* yPosArray, const float* zPosArray, float xOffset, float yOffset, float zOffset, int seed ) const final
+    FastNoise::OutputMinMax GenPositionArray3D( float* noiseOut, int count, const float* xPosArray, const float* yPosArray, const float* zPosArray, double xOffset, double yOffset, double zOffset, int seed ) const final
     {
         float32v min( kInfinity );
         float32v max( -kInfinity );
@@ -288,9 +374,9 @@ public:
         intptr_t index = 0;
         while( index < count - (intptr_t)int32v::ElementCount )
         {
-            float32v xPos = float32v( xOffset ) + FS::Load<float32v>( &xPosArray[index] );
-            float32v yPos = float32v( yOffset ) + FS::Load<float32v>( &yPosArray[index] );
-            float32v zPos = float32v( zOffset ) + FS::Load<float32v>( &zPosArray[index] );
+            PosV xPos( FS::Load<float32v>( &xPosArray[index] ), xOffset );
+            PosV yPos( FS::Load<float32v>( &yPosArray[index] ), yOffset );
+            PosV zPos( FS::Load<float32v>( &zPosArray[index] ), zOffset );
 
             float32v gen = Gen( int32v( seed ), xPos, yPos, zPos );
             FS::Store( &noiseOut[index], gen );
@@ -302,16 +388,16 @@ public:
             index += int32v::ElementCount;
         }
 
-        float32v xPos = float32v( xOffset ) + LoadRemaining( xPosArray, count, index );
-        float32v yPos = float32v( yOffset ) + LoadRemaining( yPosArray, count, index );
-        float32v zPos = float32v( zOffset ) + LoadRemaining( zPosArray, count, index );
+        PosV xPos( LoadRemaining( xPosArray, count, index ), xOffset );
+        PosV yPos( LoadRemaining( yPosArray, count, index ), yOffset );
+        PosV zPos( LoadRemaining( zPosArray, count, index ), zOffset );
 
         float32v gen = Gen( int32v( seed ), xPos, yPos, zPos );
 
         return StoreRemaining<true>( noiseOut, count, index, min, max, gen );
     }
 
-    FastNoise::OutputMinMax GenPositionArray4D( float* noiseOut, int count, const float* xPosArray, const float* yPosArray, const float* zPosArray, const float* wPosArray, float xOffset, float yOffset, float zOffset, float wOffset, int seed ) const final
+    FastNoise::OutputMinMax GenPositionArray4D( float* noiseOut, int count, const float* xPosArray, const float* yPosArray, const float* zPosArray, const float* wPosArray, double xOffset, double yOffset, double zOffset, double wOffset, int seed ) const final
     {
         float32v min( kInfinity );
         float32v max( -kInfinity );
@@ -319,10 +405,10 @@ public:
         intptr_t index = 0;
         while( index < count - (intptr_t)int32v::ElementCount )
         {
-            float32v xPos = float32v( xOffset ) + FS::Load<float32v>( &xPosArray[index] );
-            float32v yPos = float32v( yOffset ) + FS::Load<float32v>( &yPosArray[index] );
-            float32v zPos = float32v( zOffset ) + FS::Load<float32v>( &zPosArray[index] );
-            float32v wPos = float32v( wOffset ) + FS::Load<float32v>( &wPosArray[index] );
+            PosV xPos( FS::Load<float32v>( &xPosArray[index] ), xOffset );
+            PosV yPos( FS::Load<float32v>( &yPosArray[index] ), yOffset );
+            PosV zPos( FS::Load<float32v>( &zPosArray[index] ), zOffset );
+            PosV wPos( FS::Load<float32v>( &wPosArray[index] ), wOffset );
 
             float32v gen = Gen( int32v( seed ), xPos, yPos, zPos, wPos );
             FS::Store( &noiseOut[index], gen );
@@ -334,29 +420,29 @@ public:
             index += int32v::ElementCount;
         }
 
-        float32v xPos = float32v( xOffset ) + LoadRemaining( xPosArray, count, index );
-        float32v yPos = float32v( yOffset ) + LoadRemaining( yPosArray, count, index );
-        float32v zPos = float32v( zOffset ) + LoadRemaining( zPosArray, count, index );
-        float32v wPos = float32v( wOffset ) + LoadRemaining( wPosArray, count, index );
+        PosV xPos( LoadRemaining( xPosArray, count, index ), xOffset );
+        PosV yPos( LoadRemaining( yPosArray, count, index ), yOffset );
+        PosV zPos( LoadRemaining( zPosArray, count, index ), zOffset );
+        PosV wPos( LoadRemaining( wPosArray, count, index ), wOffset );
 
         float32v gen = Gen( int32v( seed ), xPos, yPos, zPos, wPos );
 
         return StoreRemaining<true>( noiseOut, count, index, min, max, gen );
     }
 
-    float GenSingle2D( float x, float y, int seed ) const final
+    float GenSingle2D( double x, double y, int seed ) const final
     {
-        return FS::Extract0( Gen( int32v( seed ), float32v( x ), float32v( y ) ) );
+        return FS::Extract0( Gen( int32v( seed ), PosV( float32v( 0 ), x ), PosV( float32v( 0 ), y ) ) );
     }
 
-    float GenSingle3D( float x, float y, float z, int seed ) const final
+    float GenSingle3D( double x, double y, double z, int seed ) const final
     {
-        return FS::Extract0( Gen( int32v( seed ), float32v( x ), float32v( y ), float32v( z ) ) );
+        return FS::Extract0( Gen( int32v( seed ), PosV( float32v( 0 ), x ), PosV( float32v( 0 ), y ), PosV( float32v( 0 ), z ) ) );
     }
 
-    float GenSingle4D( float x, float y, float z, float w, int seed ) const final
+    float GenSingle4D( double x, double y, double z, double w, int seed ) const final
     {
-        return FS::Extract0( Gen( int32v( seed ), float32v( x ), float32v( y ), float32v( z ), float32v( w ) ) );
+        return FS::Extract0( Gen( int32v( seed ), PosV( float32v( 0 ), x ), PosV( float32v( 0 ), y ), PosV( float32v( 0 ), z ), PosV( float32v( 0 ), w ) ) );
     }
 
     FastNoise::OutputMinMax GenTileable2D( float* noiseOut, int xSize, int ySize, float xStepSize, float yStepSize, int seed ) const final

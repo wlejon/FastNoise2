@@ -197,6 +197,11 @@ namespace FastNoise
          *  Output values are written in row-major order with X as the inner loop:
          *  `out[y * xCount + x]`
          *
+         *  The offsets are doubles and the noise is exact at any of them: far from the
+         *  origin (millions of units out, a planet's surface) a lattice noise splits the
+         *  offset at its own frequency, keeping its cells and the fractions between them
+         *  as fine as near zero. Only the steps from the offset are floats.
+         *
          *  @param[out] out        Pre-allocated output array. Must hold at least `xCount * yCount` floats.
          *  @param      xOffset    Starting X position in world space.
          *  @param      yOffset    Starting Y position in world space.
@@ -208,7 +213,7 @@ namespace FastNoise
          *  @return The min and max noise values written to @p out.
          */
         virtual OutputMinMax GenUniformGrid2D( float* out,
-            float xOffset,   float yOffset,
+           double xOffset,  double yOffset,
               int xCount,      int yCount,
             float xStepSize, float yStepSize,
             int seed ) const = 0; 
@@ -240,7 +245,7 @@ namespace FastNoise
          *  @return The min and max noise values written to @p out.
          */
         virtual OutputMinMax GenUniformGrid3D( float* out,
-            float xOffset,   float yOffset,   float zOffset,
+           double xOffset,  double yOffset,  double zOffset,
               int xCount,      int yCount,      int zCount,
             float xStepSize, float yStepSize, float zStepSize,
             int seed ) const = 0;
@@ -274,7 +279,7 @@ namespace FastNoise
          *  @return The min and max noise values written to @p out.
          */
         virtual OutputMinMax GenUniformGrid4D( float* out,
-            float xOffset,   float yOffset,   float zOffset,   float wOffset,
+           double xOffset,  double yOffset,  double zOffset,  double wOffset,
               int xCount,      int yCount,      int zCount,      int wCount,
             float xStepSize, float yStepSize, float zStepSize, float wStepSize,
             int seed ) const = 0;
@@ -313,6 +318,8 @@ namespace FastNoise
          *
          *  Each position is calculated as `Vector2(xPosArray[i] + xOffset, yPosArray[i] + yOffset)`.
          *  The offset parameters allow you to shift all positions without modifying the arrays.
+         *  They are doubles, kept apart from the array's floats, so positions far from the
+         *  origin are exact (see GenUniformGrid2D).
          *
          *  @param[out] out        Pre-allocated output array. Must hold at least @p count floats.
          *  @param      count      Number of positions to generate.
@@ -325,7 +332,7 @@ namespace FastNoise
          */
         virtual OutputMinMax GenPositionArray2D( float* out, int count,
             const float* xPosArray, const float* yPosArray,
-            float xOffset, float yOffset, int seed ) const = 0;
+            double xOffset, double yOffset, int seed ) const = 0;
 
         /** @brief Generate noise at arbitrary 3D positions.
          *
@@ -354,7 +361,7 @@ namespace FastNoise
          */
         virtual OutputMinMax GenPositionArray3D( float* out, int count,
             const float* xPosArray, const float* yPosArray, const float* zPosArray, 
-            float xOffset, float yOffset, float zOffset, int seed ) const = 0;
+            double xOffset, double yOffset, double zOffset, int seed ) const = 0;
 
         /** @brief Generate noise at arbitrary 4D positions.
          *  Evaluates noise at a set of caller-supplied (x, y, z, w) positions. Use this when
@@ -384,7 +391,7 @@ namespace FastNoise
          */
         virtual OutputMinMax GenPositionArray4D( float* out, int count,
             const float* xPosArray, const float* yPosArray, const float* zPosArray, const float* wPosArray, 
-            float xOffset, float yOffset, float zOffset, float wOffset, int seed ) const = 0;
+            double xOffset, double yOffset, double zOffset, double wOffset, int seed ) const = 0;
 
         /** @brief Generate a single 2D noise value at a specific position. VERY SLOW!!!
          *
@@ -397,7 +404,7 @@ namespace FastNoise
          *  @param seed Seed value for the noise. Different seeds produce different patterns.
          *  @return The noise value at the given position.
          */
-        virtual float GenSingle2D( float x, float y, int seed ) const = 0;
+        virtual float GenSingle2D( double x, double y, int seed ) const = 0;
 
         /** @brief Generate a single 3D noise value at a specific position. VERY SLOW!!!
          *
@@ -411,7 +418,7 @@ namespace FastNoise
          *  @param seed Seed value for the noise. Different seeds produce different patterns.
          *  @return The noise value at the given position.
          */
-        virtual float GenSingle3D( float x, float y, float z, int seed ) const = 0;
+        virtual float GenSingle3D( double x, double y, double z, int seed ) const = 0;
 
         /** @brief Generate a single 4D noise value at a specific position. VERY SLOW!!!
          *
@@ -426,7 +433,7 @@ namespace FastNoise
          *  @param seed Seed value for the noise. Different seeds produce different patterns.
          *  @return The noise value at the given position.
          */
-        virtual float GenSingle4D( float x, float y, float z, float w, int seed ) const = 0;
+        virtual float GenSingle4D( double x, double y, double z, double w, int seed ) const = 0;
 
     protected:
         template<typename T>

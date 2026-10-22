@@ -4,27 +4,33 @@
 template<FastSIMD::FeatureSet SIMD>
 class FastSIMD::DispatchClass<Simplex, SIMD> final : public virtual Simplex, public DispatchClass<VariableRange<Seeded<ScalableGenerator>>, SIMD>
 {
-    float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y ) const
+    float32v FS_VECTORCALL Gen( int32v seed, PosV px, PosV py ) const
     {
         seed += int32v( mSeedOffset );
-        this->ScalePositions( x, y );
+        this->ScalePositions( px, py );
 
         constexpr double kRoot3 = 1.7320508075688772935274463415059;
         constexpr double kSkew2 = 1.0 / ( kRoot3 + 1.0 );
         constexpr double kUnskew2 = -1.0 / ( kRoot3 + 3.0 );
         constexpr double kFalloffRadiusSquared = 0.5;
 
+        const PosV skewIn[] = { px, py };
+        int32_t so[2];
+        float sf[2];
+        RebaseSkewed( skewIn, float( kSkew2 ), so, sf );
+        float32v x = px.v, y = py.v;
+
         float32v skewDelta = float32v( kSkew2 ) * ( x + y );
-        float32v xSkewed = x + skewDelta;
-        float32v ySkewed = y + skewDelta;
+        float32v xSkewed = x + skewDelta + float32v( sf[0] );
+        float32v ySkewed = y + skewDelta + float32v( sf[1] );
 
         float32v xSkewedBase = FS::Floor( xSkewed );
         float32v ySkewedBase = FS::Floor( ySkewed );
         float32v dxSkewed = xSkewed - xSkewedBase;
         float32v dySkewed = ySkewed - ySkewedBase;
 
-        int32v xPrimedBase = FS::Convert<int32_t>( xSkewedBase ) * int32v( Primes::X );
-        int32v yPrimedBase = FS::Convert<int32_t>( ySkewedBase ) * int32v( Primes::Y );
+        int32v xPrimedBase = ( FS::Convert<int32_t>( xSkewedBase ) + int32v( so[0] ) ) * int32v( Primes::X );
+        int32v yPrimedBase = ( FS::Convert<int32_t>( ySkewedBase ) + int32v( so[1] ) ) * int32v( Primes::Y );
 
         mask32v xGreaterEqualY = dxSkewed >= dySkewed;
         
@@ -62,19 +68,25 @@ class FastSIMD::DispatchClass<Simplex, SIMD> final : public virtual Simplex, pub
         return this->ScaleOutput( value, -kBounding, kBounding );
     }
 
-    float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y, float32v z ) const
+    float32v FS_VECTORCALL Gen( int32v seed, PosV px, PosV py, PosV pz ) const
     {
         seed += int32v( mSeedOffset );
-        this->ScalePositions( x, y, z );
+        this->ScalePositions( px, py, pz );
 
         constexpr double kSkew3 = 1.0 / 3.0;
         constexpr double kReflectUnskew3 = -1.0 / 2.0;
         constexpr double kFalloffRadiusSquared = 0.6;
 
+        const PosV skewIn[] = { px, py, pz };
+        int32_t so[3];
+        float sf[3];
+        RebaseSkewed( skewIn, float( kSkew3 ), so, sf );
+        float32v x = px.v, y = py.v, z = pz.v;
+
         float32v skewDelta = float32v( kSkew3 ) * ( x + y + z );
-        float32v xSkewed = x + skewDelta;
-        float32v ySkewed = y + skewDelta;
-        float32v zSkewed = z + skewDelta;
+        float32v xSkewed = x + skewDelta + float32v( sf[0] );
+        float32v ySkewed = y + skewDelta + float32v( sf[1] );
+        float32v zSkewed = z + skewDelta + float32v( sf[2] );
 
         float32v xSkewedBase = FS::Floor( xSkewed );
         float32v ySkewedBase = FS::Floor( ySkewed );
@@ -83,9 +95,9 @@ class FastSIMD::DispatchClass<Simplex, SIMD> final : public virtual Simplex, pub
         float32v dySkewed = ySkewed - ySkewedBase;
         float32v dzSkewed = zSkewed - zSkewedBase;
 
-        int32v xPrimedBase = FS::Convert<int32_t>( xSkewedBase ) * int32v( Primes::X );
-        int32v yPrimedBase = FS::Convert<int32_t>( ySkewedBase ) * int32v( Primes::Y );
-        int32v zPrimedBase = FS::Convert<int32_t>( zSkewedBase ) * int32v( Primes::Z );
+        int32v xPrimedBase = ( FS::Convert<int32_t>( xSkewedBase ) + int32v( so[0] ) ) * int32v( Primes::X );
+        int32v yPrimedBase = ( FS::Convert<int32_t>( ySkewedBase ) + int32v( so[1] ) ) * int32v( Primes::Y );
+        int32v zPrimedBase = ( FS::Convert<int32_t>( zSkewedBase ) + int32v( so[2] ) ) * int32v( Primes::Z );
 
         mask32v xGreaterEqualY = dxSkewed >= dySkewed;
         mask32v yGreaterEqualZ = dySkewed >= dzSkewed;
@@ -141,21 +153,27 @@ class FastSIMD::DispatchClass<Simplex, SIMD> final : public virtual Simplex, pub
         return this->ScaleOutput( value, -kBounding, kBounding );
     }
 
-    float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y, float32v z, float32v w ) const
+    float32v FS_VECTORCALL Gen( int32v seed, PosV px, PosV py, PosV pz, PosV pw ) const
     {
         seed += int32v( mSeedOffset );
-        this->ScalePositions( x, y, z, w );
+        this->ScalePositions( px, py, pz, pw );
 
         constexpr double kRoot5 = 2.2360679774997896964091736687313;
         constexpr double kSkew4 = 1.0 / ( kRoot5 + 1.0 );
         constexpr double kUnskew4 = -1.0 / ( kRoot5 + 5.0 );
         constexpr double kFalloffRadiusSquared = 0.6;
 
+        const PosV skewIn[] = { px, py, pz, pw };
+        int32_t so[4];
+        float sf[4];
+        RebaseSkewed( skewIn, float( kSkew4 ), so, sf );
+        float32v x = px.v, y = py.v, z = pz.v, w = pw.v;
+
         float32v skewDelta = float32v( kSkew4 ) * ( x + y + z + w );
-        float32v xSkewed = x + skewDelta;
-        float32v ySkewed = y + skewDelta;
-        float32v zSkewed = z + skewDelta;
-        float32v wSkewed = w + skewDelta;
+        float32v xSkewed = x + skewDelta + float32v( sf[0] );
+        float32v ySkewed = y + skewDelta + float32v( sf[1] );
+        float32v zSkewed = z + skewDelta + float32v( sf[2] );
+        float32v wSkewed = w + skewDelta + float32v( sf[3] );
 
         float32v xSkewedBase = FS::Floor( xSkewed );
         float32v ySkewedBase = FS::Floor( ySkewed );
@@ -166,10 +184,10 @@ class FastSIMD::DispatchClass<Simplex, SIMD> final : public virtual Simplex, pub
         float32v dzSkewed = zSkewed - zSkewedBase;
         float32v dwSkewed = wSkewed - wSkewedBase;
 
-        int32v xPrimedBase = FS::Convert<int32_t>( xSkewedBase ) * int32v( Primes::X );
-        int32v yPrimedBase = FS::Convert<int32_t>( ySkewedBase ) * int32v( Primes::Y );
-        int32v zPrimedBase = FS::Convert<int32_t>( zSkewedBase ) * int32v( Primes::Z );
-        int32v wPrimedBase = FS::Convert<int32_t>( wSkewedBase ) * int32v( Primes::W );
+        int32v xPrimedBase = ( FS::Convert<int32_t>( xSkewedBase ) + int32v( so[0] ) ) * int32v( Primes::X );
+        int32v yPrimedBase = ( FS::Convert<int32_t>( ySkewedBase ) + int32v( so[1] ) ) * int32v( Primes::Y );
+        int32v zPrimedBase = ( FS::Convert<int32_t>( zSkewedBase ) + int32v( so[2] ) ) * int32v( Primes::Z );
+        int32v wPrimedBase = ( FS::Convert<int32_t>( wSkewedBase ) + int32v( so[3] ) ) * int32v( Primes::W );
 
         float32v unskewDelta = float32v( kUnskew4 ) * ( dxSkewed + dySkewed + dzSkewed + dwSkewed );
         float32v dx0 = dxSkewed + unskewDelta;
@@ -290,25 +308,31 @@ class FastSIMD::DispatchClass<Simplex, SIMD> final : public virtual Simplex, pub
 template<FastSIMD::FeatureSet SIMD>
 class FastSIMD::DispatchClass<SuperSimplex, SIMD> final : public virtual SuperSimplex, public DispatchClass<VariableRange<Seeded<ScalableGenerator>>, SIMD>
 {
-    float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y ) const
+    float32v FS_VECTORCALL Gen( int32v seed, PosV px, PosV py ) const
     {
         seed += int32v( mSeedOffset );
-        this->ScalePositions( x, y );
+        this->ScalePositions( px, py );
 
         constexpr double kRoot3 = 1.7320508075688772935274463415059;
         constexpr double kSkew2 = 1.0 / ( kRoot3 + 1.0 );
         constexpr double kUnskew2 = -1.0 / ( kRoot3 + 3.0 );
         constexpr double kFalloffRadiusSquared = 2.0 / 3.0;
 
+        const PosV skewIn[] = { px, py };
+        int32_t so[2];
+        float sf[2];
+        RebaseSkewed( skewIn, float( kSkew2 ), so, sf );
+        float32v x = px.v, y = py.v;
+
         float32v skewDelta = float32v( kSkew2 ) * ( x + y );
-        float32v xSkewed = x + skewDelta;
-        float32v ySkewed = y + skewDelta;
+        float32v xSkewed = x + skewDelta + float32v( sf[0] );
+        float32v ySkewed = y + skewDelta + float32v( sf[1] );
         float32v xSkewedBase = FS::Floor( xSkewed );
         float32v ySkewedBase = FS::Floor( ySkewed );
         float32v dxSkewed = xSkewed - xSkewedBase;
         float32v dySkewed = ySkewed - ySkewedBase;
-        int32v xPrimedBase = FS::Convert<int32_t>( xSkewedBase ) * int32v( Primes::X );
-        int32v yPrimedBase = FS::Convert<int32_t>( ySkewedBase ) * int32v( Primes::Y );
+        int32v xPrimedBase = ( FS::Convert<int32_t>( xSkewedBase ) + int32v( so[0] ) ) * int32v( Primes::X );
+        int32v yPrimedBase = ( FS::Convert<int32_t>( ySkewedBase ) + int32v( so[1] ) ) * int32v( Primes::Y );
 
         mask32v forwardXY = dxSkewed + dySkewed > float32v( 1.0f );
         float32v boundaryXY = FS::Masked( forwardXY, float32v( -1.0f ) );
@@ -376,10 +400,10 @@ class FastSIMD::DispatchClass<SuperSimplex, SIMD> final : public virtual SuperSi
         return this->ScaleOutput( value, -kBounding, kBounding );
     }
 
-    float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y, float32v z ) const
+    float32v FS_VECTORCALL Gen( int32v seed, PosV px, PosV py, PosV pz ) const
     {
         seed += int32v( mSeedOffset );
-        this->ScalePositions( x, y, z );
+        this->ScalePositions( px, py, pz );
 
         constexpr double kSkew3 = 1.0 / 3.0;
         constexpr double kReflectUnskew3 = -1.0 / 2.0;
@@ -389,11 +413,17 @@ class FastSIMD::DispatchClass<SuperSimplex, SIMD> final : public virtual SuperSi
         constexpr double kDistanceSquaredB = 1.0;
         constexpr double kFalloffRadiusSquared = kDistanceSquaredA;
 
+        const PosV skewIn[] = { px, py, pz };
+        int32_t so[3];
+        float sf[3];
+        RebaseSkewed( skewIn, float( kSkew3 ), so, sf );
+        float32v x = px.v, y = py.v, z = pz.v;
+
         float32v skewDelta = float32v( kSkew3 ) * ( x + y + z );
 
-        float32v xSkewed = x + skewDelta;
-        float32v ySkewed = y + skewDelta;
-        float32v zSkewed = z + skewDelta;
+        float32v xSkewed = x + skewDelta + float32v( sf[0] );
+        float32v ySkewed = y + skewDelta + float32v( sf[1] );
+        float32v zSkewed = z + skewDelta + float32v( sf[2] );
         float32v xSkewedBase = FS::Floor( xSkewed );
         float32v ySkewedBase = FS::Floor( ySkewed );
         float32v zSkewedBase = FS::Floor( zSkewed );
@@ -440,9 +470,9 @@ class FastSIMD::DispatchClass<SuperSimplex, SIMD> final : public virtual SuperSi
             dzSkewed = FS::MaskedDecrement( moveZ, dzSkewed );
         }
 
-        int32v xPrimedBase = FS::Convert<int32_t>( xSkewedBase ) * int32v( Primes::X );
-        int32v yPrimedBase = FS::Convert<int32_t>( ySkewedBase ) * int32v( Primes::Y );
-        int32v zPrimedBase = FS::Convert<int32_t>( zSkewedBase ) * int32v( Primes::Z );
+        int32v xPrimedBase = ( FS::Convert<int32_t>( xSkewedBase ) + int32v( so[0] ) ) * int32v( Primes::X );
+        int32v yPrimedBase = ( FS::Convert<int32_t>( ySkewedBase ) + int32v( so[1] ) ) * int32v( Primes::Y );
+        int32v zPrimedBase = ( FS::Convert<int32_t>( zSkewedBase ) + int32v( so[2] ) ) * int32v( Primes::Z );
 
         float32v skewedCoordinateSum = dxSkewed + dySkewed + dzSkewed;
         float32v twiceUnskewDelta = float32v( kTwiceUnskew3 ) * skewedCoordinateSum;
@@ -575,10 +605,10 @@ class FastSIMD::DispatchClass<SuperSimplex, SIMD> final : public virtual SuperSi
         return this->ScaleOutput( value, -kBounding, kBounding );
     }
 
-    float32v FS_VECTORCALL Gen( int32v seed, float32v x, float32v y, float32v z, float32v w ) const
+    float32v FS_VECTORCALL Gen( int32v seed, PosV px, PosV py, PosV pz, PosV pw ) const
     {
         seed += int32v( mSeedOffset );
-        this->ScalePositions( x, y, z, w );
+        this->ScalePositions( px, py, pz, pw );
 
         constexpr double kRoot5 = 2.2360679774997896964091736687313;
         constexpr double kSkew4 = 1.0 / ( kRoot5 + 1.0 );
@@ -589,12 +619,18 @@ class FastSIMD::DispatchClass<SuperSimplex, SIMD> final : public virtual SuperSi
         constexpr double kDistanceSquaredB = 6.0 / 5.0;
         constexpr double kFalloffRadiusSquared = kDistanceSquaredA;
 
+        const PosV skewIn[] = { px, py, pz, pw };
+        int32_t so[4];
+        float sf[4];
+        RebaseSkewed( skewIn, float( kSkew4 ), so, sf );
+        float32v x = px.v, y = py.v, z = pz.v, w = pw.v;
+
         float32v skewDelta = float32v( kSkew4 ) * ( x + y + z + w );
 
-        float32v xSkewed = x + skewDelta;
-        float32v ySkewed = y + skewDelta;
-        float32v zSkewed = z + skewDelta;
-        float32v wSkewed = w + skewDelta;
+        float32v xSkewed = x + skewDelta + float32v( sf[0] );
+        float32v ySkewed = y + skewDelta + float32v( sf[1] );
+        float32v zSkewed = z + skewDelta + float32v( sf[2] );
+        float32v wSkewed = w + skewDelta + float32v( sf[3] );
         float32v xSkewedBase = FS::Floor( xSkewed );
         float32v ySkewedBase = FS::Floor( ySkewed );
         float32v zSkewedBase = FS::Floor( zSkewed );
@@ -658,10 +694,10 @@ class FastSIMD::DispatchClass<SuperSimplex, SIMD> final : public virtual SuperSi
             dwSkewed = FS::MaskedDecrement( moveW, dwSkewed );
         }
 
-        int32v xPrimedBase = FS::Convert<int32_t>( xSkewedBase ) * int32v( Primes::X );
-        int32v yPrimedBase = FS::Convert<int32_t>( ySkewedBase ) * int32v( Primes::Y );
-        int32v zPrimedBase = FS::Convert<int32_t>( zSkewedBase ) * int32v( Primes::Z );
-        int32v wPrimedBase = FS::Convert<int32_t>( wSkewedBase ) * int32v( Primes::W );
+        int32v xPrimedBase = ( FS::Convert<int32_t>( xSkewedBase ) + int32v( so[0] ) ) * int32v( Primes::X );
+        int32v yPrimedBase = ( FS::Convert<int32_t>( ySkewedBase ) + int32v( so[1] ) ) * int32v( Primes::Y );
+        int32v zPrimedBase = ( FS::Convert<int32_t>( zSkewedBase ) + int32v( so[2] ) ) * int32v( Primes::Z );
+        int32v wPrimedBase = ( FS::Convert<int32_t>( wSkewedBase ) + int32v( so[3] ) ) * int32v( Primes::W );
 
         float32v skewedCoordinateSum = dxSkewed + dySkewed + dzSkewed + dwSkewed;
         float32v twiceUnskewDelta = float32v( kTwiceUnskew4 ) * skewedCoordinateSum;

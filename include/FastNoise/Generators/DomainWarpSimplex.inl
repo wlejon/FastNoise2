@@ -728,65 +728,71 @@ template<FastSIMD::FeatureSet SIMD>
 class FastSIMD::DispatchClass<DomainWarpSimplex, SIMD> final : public virtual DomainWarpSimplex, public DispatchClass<DomainWarp, SIMD>
 {
 public:
-    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, float32v x, float32v y, float32v& xOut, float32v& yOut ) const final
+    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, PosV px, PosV py, PosV& xOut, PosV& yOut ) const final
     {
         seed += int32v( mSeedOffset );
         switch( mVectorizationScheme )
         {
         default:
         case VectorizationScheme::OrthogonalGradientMatrix:
-            return Warp_2D<VectorizationScheme::OrthogonalGradientMatrix>( seed, warpAmp, x, y, xOut, yOut );
+            return Warp_2D<VectorizationScheme::OrthogonalGradientMatrix>( seed, warpAmp, px, py, xOut, yOut );
         case VectorizationScheme::GradientOuterProduct:
-            return Warp_2D<VectorizationScheme::GradientOuterProduct>( seed, warpAmp, x, y, xOut, yOut );
+            return Warp_2D<VectorizationScheme::GradientOuterProduct>( seed, warpAmp, px, py, xOut, yOut );
         }
     }
 
-    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, float32v x, float32v y, float32v z, float32v& xOut, float32v& yOut, float32v& zOut ) const final
+    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, PosV px, PosV py, PosV pz, PosV& xOut, PosV& yOut, PosV& zOut ) const final
     {
         seed += int32v( mSeedOffset );
         switch( mVectorizationScheme ) 
         {
         default:
         case VectorizationScheme::OrthogonalGradientMatrix:
-            return Warp_3D<VectorizationScheme::OrthogonalGradientMatrix>( seed, warpAmp, x, y, z, xOut, yOut, zOut );
+            return Warp_3D<VectorizationScheme::OrthogonalGradientMatrix>( seed, warpAmp, px, py, pz, xOut, yOut, zOut );
         case VectorizationScheme::GradientOuterProduct:
-            return Warp_3D<VectorizationScheme::GradientOuterProduct>( seed, warpAmp, x, y, z, xOut, yOut, zOut );
+            return Warp_3D<VectorizationScheme::GradientOuterProduct>( seed, warpAmp, px, py, pz, xOut, yOut, zOut );
         }        
     }
 
-    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, float32v x, float32v y, float32v z, float32v w, float32v& xOut, float32v& yOut, float32v& zOut, float32v& wOut ) const final
+    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, PosV px, PosV py, PosV pz, PosV pw, PosV& xOut, PosV& yOut, PosV& zOut, PosV& wOut ) const final
     {
         seed += int32v( mSeedOffset );
         switch( mVectorizationScheme )
         {
         default:
         case VectorizationScheme::OrthogonalGradientMatrix:
-            return Warp_4D<VectorizationScheme::OrthogonalGradientMatrix>( seed, warpAmp, x, y, z, w, xOut, yOut, zOut, wOut );
+            return Warp_4D<VectorizationScheme::OrthogonalGradientMatrix>( seed, warpAmp, px, py, pz, pw, xOut, yOut, zOut, wOut );
         case VectorizationScheme::GradientOuterProduct:
-            return Warp_4D<VectorizationScheme::GradientOuterProduct>( seed, warpAmp, x, y, z, w, xOut, yOut, zOut, wOut );
+            return Warp_4D<VectorizationScheme::GradientOuterProduct>( seed, warpAmp, px, py, pz, pw, xOut, yOut, zOut, wOut );
         }
     }
 
 protected:
     template<VectorizationScheme Scheme>
-    float32v FS_VECTORCALL Warp_2D( int32v seed, float32v warpAmp, float32v x, float32v y, float32v& xOut, float32v& yOut ) const
+    float32v FS_VECTORCALL Warp_2D( int32v seed, float32v warpAmp, PosV px, PosV py, PosV& xOut, PosV& yOut ) const
     {
         constexpr double kRoot3 = 1.7320508075688772935274463415059;
         constexpr double kSkew2 = 1.0 / ( kRoot3 + 1.0 );
         constexpr double kUnskew2 = -1.0 / ( kRoot3 + 3.0 );
         constexpr double kFalloffRadiusSquared = 0.5;
 
+        const PosV skewIn[] = { px, py };
+        int32_t so[2];
+        float sf[2];
+        RebaseSkewed( skewIn, float( kSkew2 ), so, sf );
+        float32v x = px.v, y = py.v;
+
         float32v skewDelta = float32v( kSkew2 ) * ( x + y );
-        float32v xSkewed = x + skewDelta;
-        float32v ySkewed = y + skewDelta;
+        float32v xSkewed = x + skewDelta + float32v( sf[0] );
+        float32v ySkewed = y + skewDelta + float32v( sf[1] );
 
         float32v xSkewedBase = FS::Floor( xSkewed );
         float32v ySkewedBase = FS::Floor( ySkewed );
         float32v dxSkewed = xSkewed - xSkewedBase;
         float32v dySkewed = ySkewed - ySkewedBase;
 
-        int32v xPrimedBase = FS::Convert<int32_t>( xSkewedBase ) * int32v( Primes::X );
-        int32v yPrimedBase = FS::Convert<int32_t>( ySkewedBase ) * int32v( Primes::Y );
+        int32v xPrimedBase = ( FS::Convert<int32_t>( xSkewedBase ) + int32v( so[0] ) ) * int32v( Primes::X );
+        int32v yPrimedBase = ( FS::Convert<int32_t>( ySkewedBase ) + int32v( so[1] ) ) * int32v( Primes::Y );
 
         mask32v xGreaterEqualY = dxSkewed >= dySkewed;
 
@@ -826,23 +832,29 @@ protected:
 
         valueX *= float32v( kBounding * this->mAxisScale[0] );
         valueY *= float32v( kBounding * this->mAxisScale[1] );
-        xOut = FS::FMulAdd( valueX, warpAmp, xOut );
-        yOut = FS::FMulAdd( valueY, warpAmp, yOut );
+        xOut.v = FS::FMulAdd( valueX, warpAmp, xOut.v );
+        yOut.v = FS::FMulAdd( valueY, warpAmp, yOut.v );
 
         return FS::FMulAdd( valueY, valueY, valueX * valueX );
     }
 
     template<VectorizationScheme Scheme>
-    float32v FS_VECTORCALL Warp_3D( int32v seed, float32v warpAmp, float32v x, float32v y, float32v z, float32v& xOut, float32v& yOut, float32v& zOut ) const
+    float32v FS_VECTORCALL Warp_3D( int32v seed, float32v warpAmp, PosV px, PosV py, PosV pz, PosV& xOut, PosV& yOut, PosV& zOut ) const
     {
         constexpr double kSkew3 = 1.0 / 3.0;
         constexpr double kReflectUnskew3 = -1.0 / 2.0;
         constexpr double kFalloffRadiusSquared = 0.6;
 
+        const PosV skewIn[] = { px, py, pz };
+        int32_t so[3];
+        float sf[3];
+        RebaseSkewed( skewIn, float( kSkew3 ), so, sf );
+        float32v x = px.v, y = py.v, z = pz.v;
+
         float32v skewDelta = float32v( kSkew3 ) * ( x + y + z );
-        float32v xSkewed = x + skewDelta;
-        float32v ySkewed = y + skewDelta;
-        float32v zSkewed = z + skewDelta;
+        float32v xSkewed = x + skewDelta + float32v( sf[0] );
+        float32v ySkewed = y + skewDelta + float32v( sf[1] );
+        float32v zSkewed = z + skewDelta + float32v( sf[2] );
 
         float32v xSkewedBase = FS::Floor( xSkewed );
         float32v ySkewedBase = FS::Floor( ySkewed );
@@ -851,9 +863,9 @@ protected:
         float32v dySkewed = ySkewed - ySkewedBase;
         float32v dzSkewed = zSkewed - zSkewedBase;
 
-        int32v xPrimedBase = FS::Convert<int32_t>( xSkewedBase ) * int32v( Primes::X );
-        int32v yPrimedBase = FS::Convert<int32_t>( ySkewedBase ) * int32v( Primes::Y );
-        int32v zPrimedBase = FS::Convert<int32_t>( zSkewedBase ) * int32v( Primes::Z );
+        int32v xPrimedBase = ( FS::Convert<int32_t>( xSkewedBase ) + int32v( so[0] ) ) * int32v( Primes::X );
+        int32v yPrimedBase = ( FS::Convert<int32_t>( ySkewedBase ) + int32v( so[1] ) ) * int32v( Primes::Y );
+        int32v zPrimedBase = ( FS::Convert<int32_t>( zSkewedBase ) + int32v( so[2] ) ) * int32v( Primes::Z );
 
         mask32v xGreaterEqualY = dxSkewed >= dySkewed;
         mask32v yGreaterEqualZ = dySkewed >= dzSkewed;
@@ -923,26 +935,32 @@ protected:
         valueX *= float32v( kBounding * this->mAxisScale[0] );
         valueY *= float32v( kBounding * this->mAxisScale[1] );
         valueZ *= float32v( kBounding * this->mAxisScale[2] );
-        xOut = FS::FMulAdd( valueX, warpAmp, xOut );
-        yOut = FS::FMulAdd( valueY, warpAmp, yOut );
-        zOut = FS::FMulAdd( valueZ, warpAmp, zOut );
+        xOut.v = FS::FMulAdd( valueX, warpAmp, xOut.v );
+        yOut.v = FS::FMulAdd( valueY, warpAmp, yOut.v );
+        zOut.v = FS::FMulAdd( valueZ, warpAmp, zOut.v );
 
         return FS::FMulAdd( valueZ, valueZ, FS::FMulAdd( valueY, valueY, valueX * valueX ) );
     }
 
     template<VectorizationScheme Scheme>
-    float32v FS_VECTORCALL Warp_4D( int32v seed, float32v warpAmp, float32v x, float32v y, float32v z, float32v w, float32v& xOut, float32v& yOut, float32v& zOut, float32v& wOut ) const
+    float32v FS_VECTORCALL Warp_4D( int32v seed, float32v warpAmp, PosV px, PosV py, PosV pz, PosV pw, PosV& xOut, PosV& yOut, PosV& zOut, PosV& wOut ) const
     {
         constexpr double kRoot5 = 2.2360679774997896964091736687313;
         constexpr double kSkew4 = 1.0 / ( kRoot5 + 1.0 );
         constexpr double kUnskew4 = -1.0 / ( kRoot5 + 5.0 );
         constexpr double kFalloffRadiusSquared = 0.6;
 
+        const PosV skewIn[] = { px, py, pz, pw };
+        int32_t so[4];
+        float sf[4];
+        RebaseSkewed( skewIn, float( kSkew4 ), so, sf );
+        float32v x = px.v, y = py.v, z = pz.v, w = pw.v;
+
         float32v skewDelta = float32v( kSkew4 ) * ( x + y + z + w );
-        float32v xSkewed = x + skewDelta;
-        float32v ySkewed = y + skewDelta;
-        float32v zSkewed = z + skewDelta;
-        float32v wSkewed = w + skewDelta;
+        float32v xSkewed = x + skewDelta + float32v( sf[0] );
+        float32v ySkewed = y + skewDelta + float32v( sf[1] );
+        float32v zSkewed = z + skewDelta + float32v( sf[2] );
+        float32v wSkewed = w + skewDelta + float32v( sf[3] );
 
         float32v xSkewedBase = FS::Floor( xSkewed );
         float32v ySkewedBase = FS::Floor( ySkewed );
@@ -953,10 +971,10 @@ protected:
         float32v dzSkewed = zSkewed - zSkewedBase;
         float32v dwSkewed = wSkewed - wSkewedBase;
 
-        int32v xPrimedBase = FS::Convert<int32_t>( xSkewedBase ) * int32v( Primes::X );
-        int32v yPrimedBase = FS::Convert<int32_t>( ySkewedBase ) * int32v( Primes::Y );
-        int32v zPrimedBase = FS::Convert<int32_t>( zSkewedBase ) * int32v( Primes::Z );
-        int32v wPrimedBase = FS::Convert<int32_t>( wSkewedBase ) * int32v( Primes::W );
+        int32v xPrimedBase = ( FS::Convert<int32_t>( xSkewedBase ) + int32v( so[0] ) ) * int32v( Primes::X );
+        int32v yPrimedBase = ( FS::Convert<int32_t>( ySkewedBase ) + int32v( so[1] ) ) * int32v( Primes::Y );
+        int32v zPrimedBase = ( FS::Convert<int32_t>( zSkewedBase ) + int32v( so[2] ) ) * int32v( Primes::Z );
+        int32v wPrimedBase = ( FS::Convert<int32_t>( wSkewedBase ) + int32v( so[3] ) ) * int32v( Primes::W );
 
         float32v unskewDelta = float32v( kUnskew4 ) * ( dxSkewed + dySkewed + dzSkewed + dwSkewed );
         float32v dx0 = dxSkewed + unskewDelta;
@@ -1078,10 +1096,10 @@ protected:
         valueY *= float32v( kBounding * this->mAxisScale[1] );
         valueZ *= float32v( kBounding * this->mAxisScale[2] );
         valueW *= float32v( kBounding * this->mAxisScale[3] );
-        xOut = FS::FMulAdd( valueX, warpAmp, xOut );
-        yOut = FS::FMulAdd( valueY, warpAmp, yOut );
-        zOut = FS::FMulAdd( valueZ, warpAmp, zOut );
-        wOut = FS::FMulAdd( valueW, warpAmp, wOut );
+        xOut.v = FS::FMulAdd( valueX, warpAmp, xOut.v );
+        yOut.v = FS::FMulAdd( valueY, warpAmp, yOut.v );
+        zOut.v = FS::FMulAdd( valueZ, warpAmp, zOut.v );
+        wOut.v = FS::FMulAdd( valueW, warpAmp, wOut.v );
 
         return FS::FMulAdd( valueW, valueW, FS::FMulAdd( valueZ, valueZ, FS::FMulAdd( valueY, valueY, valueX * valueX ) ) );
     }
@@ -1091,63 +1109,69 @@ template<FastSIMD::FeatureSet SIMD>
 class FastSIMD::DispatchClass<DomainWarpSuperSimplex, SIMD> final : public virtual DomainWarpSuperSimplex, public DispatchClass<DomainWarp, SIMD>
 {
 public:
-    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, float32v x, float32v y, float32v& xOut, float32v& yOut ) const final
+    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, PosV px, PosV py, PosV& xOut, PosV& yOut ) const final
     {
         seed += int32v( mSeedOffset );
         switch( mVectorizationScheme )
         {
         default:
         case VectorizationScheme::OrthogonalGradientMatrix:
-            return Warp_2D<VectorizationScheme::OrthogonalGradientMatrix>( seed, warpAmp, x, y, xOut, yOut );
+            return Warp_2D<VectorizationScheme::OrthogonalGradientMatrix>( seed, warpAmp, px, py, xOut, yOut );
         case VectorizationScheme::GradientOuterProduct:
-            return Warp_2D<VectorizationScheme::GradientOuterProduct>( seed, warpAmp, x, y, xOut, yOut );
+            return Warp_2D<VectorizationScheme::GradientOuterProduct>( seed, warpAmp, px, py, xOut, yOut );
         }
     }
 
-    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, float32v x, float32v y, float32v z, float32v& xOut, float32v& yOut, float32v& zOut ) const final
+    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, PosV px, PosV py, PosV pz, PosV& xOut, PosV& yOut, PosV& zOut ) const final
     {
         seed += int32v( mSeedOffset );
         switch( mVectorizationScheme ) 
         {
         default:
         case VectorizationScheme::OrthogonalGradientMatrix:
-            return Warp_3D<VectorizationScheme::OrthogonalGradientMatrix>( seed, warpAmp, x, y, z, xOut, yOut, zOut );
+            return Warp_3D<VectorizationScheme::OrthogonalGradientMatrix>( seed, warpAmp, px, py, pz, xOut, yOut, zOut );
         case VectorizationScheme::GradientOuterProduct:
-            return Warp_3D<VectorizationScheme::GradientOuterProduct>( seed, warpAmp, x, y, z, xOut, yOut, zOut );
+            return Warp_3D<VectorizationScheme::GradientOuterProduct>( seed, warpAmp, px, py, pz, xOut, yOut, zOut );
         }        
     }
 
-    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, float32v x, float32v y, float32v z, float32v w, float32v& xOut, float32v& yOut, float32v& zOut, float32v& wOut ) const final
+    float32v FS_VECTORCALL Warp( int32v seed, float32v warpAmp, PosV px, PosV py, PosV pz, PosV pw, PosV& xOut, PosV& yOut, PosV& zOut, PosV& wOut ) const final
     {
         seed += int32v( mSeedOffset );
         switch( mVectorizationScheme )
         {
         default:
         case VectorizationScheme::OrthogonalGradientMatrix:
-            return Warp_4D<VectorizationScheme::OrthogonalGradientMatrix>( seed, warpAmp, x, y, z, w, xOut, yOut, zOut, wOut );
+            return Warp_4D<VectorizationScheme::OrthogonalGradientMatrix>( seed, warpAmp, px, py, pz, pw, xOut, yOut, zOut, wOut );
         case VectorizationScheme::GradientOuterProduct:
-            return Warp_4D<VectorizationScheme::GradientOuterProduct>( seed, warpAmp, x, y, z, w, xOut, yOut, zOut, wOut );
+            return Warp_4D<VectorizationScheme::GradientOuterProduct>( seed, warpAmp, px, py, pz, pw, xOut, yOut, zOut, wOut );
         }
     }
 
 protected:
     template<VectorizationScheme Scheme>
-    float32v FS_VECTORCALL Warp_2D( int32v seed, float32v warpAmp, float32v x, float32v y, float32v& xOut, float32v& yOut ) const
+    float32v FS_VECTORCALL Warp_2D( int32v seed, float32v warpAmp, PosV px, PosV py, PosV& xOut, PosV& yOut ) const
     {
         constexpr double kRoot3 = 1.7320508075688772935274463415059;
         constexpr double kSkew2 = 1.0 / ( kRoot3 + 1.0 );
         constexpr double kUnskew2 = -1.0 / ( kRoot3 + 3.0 );
         constexpr double kFalloffRadiusSquared = 2.0 / 3.0;
 
+        const PosV skewIn[] = { px, py };
+        int32_t so[2];
+        float sf[2];
+        RebaseSkewed( skewIn, float( kSkew2 ), so, sf );
+        float32v x = px.v, y = py.v;
+
         float32v skewDelta = float32v( kSkew2 ) * ( x + y );
-        float32v xSkewed = x + skewDelta;
-        float32v ySkewed = y + skewDelta;
+        float32v xSkewed = x + skewDelta + float32v( sf[0] );
+        float32v ySkewed = y + skewDelta + float32v( sf[1] );
         float32v xSkewedBase = FS::Floor( xSkewed );
         float32v ySkewedBase = FS::Floor( ySkewed );
         float32v dxSkewed = xSkewed - xSkewedBase;
         float32v dySkewed = ySkewed - ySkewedBase;
-        int32v xPrimedBase = FS::Convert<int32_t>( xSkewedBase ) * int32v( Primes::X );
-        int32v yPrimedBase = FS::Convert<int32_t>( ySkewedBase ) * int32v( Primes::Y );
+        int32v xPrimedBase = ( FS::Convert<int32_t>( xSkewedBase ) + int32v( so[0] ) ) * int32v( Primes::X );
+        int32v yPrimedBase = ( FS::Convert<int32_t>( ySkewedBase ) + int32v( so[1] ) ) * int32v( Primes::Y );
 
         mask32v forwardXY = dxSkewed + dySkewed > float32v( 1.0f );
         float32v boundaryXY = FS::Masked( forwardXY, float32v( -1.0f ) );
@@ -1214,14 +1238,14 @@ protected:
 
         valueX *= float32v( kBounding * this->mAxisScale[0] );
         valueY *= float32v( kBounding * this->mAxisScale[1] );
-        xOut = FS::FMulAdd( valueX, warpAmp, xOut );
-        yOut = FS::FMulAdd( valueY, warpAmp, yOut );
+        xOut.v = FS::FMulAdd( valueX, warpAmp, xOut.v );
+        yOut.v = FS::FMulAdd( valueY, warpAmp, yOut.v );
 
         return FS::FMulAdd( valueY, valueY, valueX * valueX );
     }
 
     template<VectorizationScheme Scheme>
-    float32v FS_VECTORCALL Warp_3D( int32v seed, float32v warpAmp, float32v x, float32v y, float32v z, float32v& xOut, float32v& yOut, float32v& zOut ) const
+    float32v FS_VECTORCALL Warp_3D( int32v seed, float32v warpAmp, PosV px, PosV py, PosV pz, PosV& xOut, PosV& yOut, PosV& zOut ) const
     {
         constexpr double kSkew3 = 1.0 / 3.0;
         constexpr double kReflectUnskew3 = -1.0 / 2.0;
@@ -1231,11 +1255,17 @@ protected:
         constexpr double kDistanceSquaredB = 1.0;
         constexpr double kFalloffRadiusSquared = kDistanceSquaredA;
 
+        const PosV skewIn[] = { px, py, pz };
+        int32_t so[3];
+        float sf[3];
+        RebaseSkewed( skewIn, float( kSkew3 ), so, sf );
+        float32v x = px.v, y = py.v, z = pz.v;
+
         float32v skewDelta = float32v( kSkew3 ) * ( x + y + z );
 
-        float32v xSkewed = x + skewDelta;
-        float32v ySkewed = y + skewDelta;
-        float32v zSkewed = z + skewDelta;
+        float32v xSkewed = x + skewDelta + float32v( sf[0] );
+        float32v ySkewed = y + skewDelta + float32v( sf[1] );
+        float32v zSkewed = z + skewDelta + float32v( sf[2] );
         float32v xSkewedBase = FS::Floor( xSkewed );
         float32v ySkewedBase = FS::Floor( ySkewed );
         float32v zSkewedBase = FS::Floor( zSkewed );
@@ -1282,9 +1312,9 @@ protected:
             dzSkewed = FS::MaskedDecrement( moveZ, dzSkewed );
         }
 
-        int32v xPrimedBase = FS::Convert<int32_t>( xSkewedBase ) * int32v( Primes::X );
-        int32v yPrimedBase = FS::Convert<int32_t>( ySkewedBase ) * int32v( Primes::Y );
-        int32v zPrimedBase = FS::Convert<int32_t>( zSkewedBase ) * int32v( Primes::Z );
+        int32v xPrimedBase = ( FS::Convert<int32_t>( xSkewedBase ) + int32v( so[0] ) ) * int32v( Primes::X );
+        int32v yPrimedBase = ( FS::Convert<int32_t>( ySkewedBase ) + int32v( so[1] ) ) * int32v( Primes::Y );
+        int32v zPrimedBase = ( FS::Convert<int32_t>( zSkewedBase ) + int32v( so[2] ) ) * int32v( Primes::Z );
 
         float32v skewedCoordinateSum = dxSkewed + dySkewed + dzSkewed;
         float32v twiceUnskewDelta = float32v( kTwiceUnskew3 ) * skewedCoordinateSum;
@@ -1441,15 +1471,15 @@ protected:
         valueX *= float32v( kBounding * this->mAxisScale[0] );
         valueY *= float32v( kBounding * this->mAxisScale[1] );
         valueZ *= float32v( kBounding * this->mAxisScale[2] );
-        xOut = FS::FMulAdd( valueX, warpAmp, xOut );
-        yOut = FS::FMulAdd( valueY, warpAmp, yOut );
-        zOut = FS::FMulAdd( valueZ, warpAmp, zOut );
+        xOut.v = FS::FMulAdd( valueX, warpAmp, xOut.v );
+        yOut.v = FS::FMulAdd( valueY, warpAmp, yOut.v );
+        zOut.v = FS::FMulAdd( valueZ, warpAmp, zOut.v );
 
         return FS::FMulAdd( valueZ, valueZ, FS::FMulAdd( valueY, valueY, valueX * valueX ) );
     }
 
     template<VectorizationScheme Scheme>
-    float32v FS_VECTORCALL Warp_4D( int32v seed, float32v warpAmp, float32v x, float32v y, float32v z, float32v w, float32v& xOut, float32v& yOut, float32v& zOut, float32v& wOut ) const
+    float32v FS_VECTORCALL Warp_4D( int32v seed, float32v warpAmp, PosV px, PosV py, PosV pz, PosV pw, PosV& xOut, PosV& yOut, PosV& zOut, PosV& wOut ) const
     {
         constexpr double kRoot5 = 2.2360679774997896964091736687313;
         constexpr double kSkew4 = 1.0 / ( kRoot5 + 1.0 );
@@ -1460,12 +1490,18 @@ protected:
         constexpr double kDistanceSquaredB = 6.0 / 5.0;
         constexpr double kFalloffRadiusSquared = kDistanceSquaredA;
 
+        const PosV skewIn[] = { px, py, pz, pw };
+        int32_t so[4];
+        float sf[4];
+        RebaseSkewed( skewIn, float( kSkew4 ), so, sf );
+        float32v x = px.v, y = py.v, z = pz.v, w = pw.v;
+
         float32v skewDelta = float32v( kSkew4 ) * ( x + y + z + w );
 
-        float32v xSkewed = x + skewDelta;
-        float32v ySkewed = y + skewDelta;
-        float32v zSkewed = z + skewDelta;
-        float32v wSkewed = w + skewDelta;
+        float32v xSkewed = x + skewDelta + float32v( sf[0] );
+        float32v ySkewed = y + skewDelta + float32v( sf[1] );
+        float32v zSkewed = z + skewDelta + float32v( sf[2] );
+        float32v wSkewed = w + skewDelta + float32v( sf[3] );
         float32v xSkewedBase = FS::Floor( xSkewed );
         float32v ySkewedBase = FS::Floor( ySkewed );
         float32v zSkewedBase = FS::Floor( zSkewed );
@@ -1529,10 +1565,10 @@ protected:
             dwSkewed = FS::MaskedDecrement( moveW, dwSkewed );
         }
 
-        int32v xPrimedBase = FS::Convert<int32_t>( xSkewedBase ) * int32v( Primes::X );
-        int32v yPrimedBase = FS::Convert<int32_t>( ySkewedBase ) * int32v( Primes::Y );
-        int32v zPrimedBase = FS::Convert<int32_t>( zSkewedBase ) * int32v( Primes::Z );
-        int32v wPrimedBase = FS::Convert<int32_t>( wSkewedBase ) * int32v( Primes::W );
+        int32v xPrimedBase = ( FS::Convert<int32_t>( xSkewedBase ) + int32v( so[0] ) ) * int32v( Primes::X );
+        int32v yPrimedBase = ( FS::Convert<int32_t>( ySkewedBase ) + int32v( so[1] ) ) * int32v( Primes::Y );
+        int32v zPrimedBase = ( FS::Convert<int32_t>( zSkewedBase ) + int32v( so[2] ) ) * int32v( Primes::Z );
+        int32v wPrimedBase = ( FS::Convert<int32_t>( wSkewedBase ) + int32v( so[3] ) ) * int32v( Primes::W );
 
         float32v skewedCoordinateSum = dxSkewed + dySkewed + dzSkewed + dwSkewed;
         float32v twiceUnskewDelta = float32v( kTwiceUnskew4 ) * skewedCoordinateSum;
@@ -1829,10 +1865,10 @@ protected:
         valueY *= float32v( kBounding * this->mAxisScale[1] );
         valueZ *= float32v( kBounding * this->mAxisScale[2] );
         valueW *= float32v( kBounding * this->mAxisScale[3] );
-        xOut = FS::FMulAdd( valueX, warpAmp, xOut );
-        yOut = FS::FMulAdd( valueY, warpAmp, yOut );
-        zOut = FS::FMulAdd( valueZ, warpAmp, zOut );
-        wOut = FS::FMulAdd( valueW, warpAmp, wOut );
+        xOut.v = FS::FMulAdd( valueX, warpAmp, xOut.v );
+        yOut.v = FS::FMulAdd( valueY, warpAmp, yOut.v );
+        zOut.v = FS::FMulAdd( valueZ, warpAmp, zOut.v );
+        wOut.v = FS::FMulAdd( valueW, warpAmp, wOut.v );
 
         return FS::FMulAdd( valueW, valueW, FS::FMulAdd( valueZ, valueZ, FS::FMulAdd( valueY, valueY, valueX * valueX ) ) );
     }
